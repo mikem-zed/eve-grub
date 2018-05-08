@@ -129,6 +129,20 @@ grub_env_context_close (void)
 
       for (p = grub_current_context->vars[i]; p; p = q)
 	{
+	  if (p->global)
+	    {
+	      /* Set and export all global variables inside
+		 the calling/previous context.  */
+	      struct grub_env_context *tmp_context = grub_current_context;
+	      grub_current_context = grub_current_context->prev;
+	      if (grub_env_set (p->name, p->value) == GRUB_ERR_NONE)
+		{
+		  grub_env_export (p->name);
+		  grub_register_variable_hook (p->name, p->read_hook, p->write_hook);
+		}
+	      grub_current_context = tmp_context;
+	    }
+
 	  q = p->next;
           grub_free (p->name);
 	  grub_free (p->value);
