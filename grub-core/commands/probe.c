@@ -24,6 +24,7 @@
 #include <grub/device.h>
 #include <grub/disk.h>
 #include <grub/partition.h>
+#include <grub/gpt_partition.h>
 #include <grub/net.h>
 #include <grub/fs.h>
 #include <grub/file.h>
@@ -45,6 +46,7 @@ static const struct grub_arg_option options[] =
     {"fs",		'f', 0, N_("Determine filesystem type."), 0, 0},
     {"fs-uuid",		'u', 0, N_("Determine filesystem UUID."), 0, 0},
     {"label",		'l', 0, N_("Determine filesystem label."), 0, 0},
+    {"part-uuid",       'U', 0, N_("Determine partition UUID."), 0, 0},
     {0, 0, 0, 0, 0, 0}
   };
 
@@ -95,6 +97,27 @@ grub_cmd_probe (grub_extcmd_context_t ctxt, int argc, char **args)
 	grub_env_set (state[0].arg, val);
       else
 	grub_printf ("%s", val);
+      grub_device_close (dev);
+      return GRUB_ERR_NONE;
+    }
+  if (state[6].set)
+    {
+      char *uuid;
+      const char *partmap = "none";
+
+      if (dev->disk || dev->disk->partition)
+	partmap = dev->disk->partition->partmap->name;
+
+      if (grub_strcmp(partmap, "gpt") != 0)
+	grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+		    N_("not a GPT partition"));
+      if (grub_gpt_part_uuid (dev, &uuid))
+	return grub_errno;
+      if (state[0].set)
+	grub_env_set (state[0].arg, uuid);
+      else
+	grub_printf ("%s", uuid);
+      grub_free (uuid);
       grub_device_close (dev);
       return GRUB_ERR_NONE;
     }
