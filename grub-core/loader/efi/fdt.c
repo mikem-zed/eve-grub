@@ -25,9 +25,43 @@
 #include <grub/efi/efi.h>
 #include <grub/efi/fdtload.h>
 #include <grub/efi/memory.h>
+#include <grub/cpu/efi/memory.h>
 
 static void *loaded_fdt;
 static void *fdt;
+static grub_efi_guid_t dt_fixup_guid = GRUB_EFI_DT_FIXUP_PROTOCOL_GUID;
+
+static void *grub_fdt_fixup (void)
+{
+  grub_efi_dt_fixup_t *dt_fixup_prot;
+  grub_efi_uintn_t size = 0;
+  grub_efi_status_t status;
+  void *fixup_fdt;
+
+  dt_fixup_prot = grub_efi_locate_protocol (&dt_fixup_guid, 0);
+  if (! dt_fixup_prot)
+    return loaded_fdt;
+
+  grub_dprintf ("linux", "EFI_DT_FIXUP_PROTOCOL available\n");
+
+  status = efi_call_4 (dt_fixup_prot->fixup, dt_fixup_prot, loaded_fdt, &size,
+		       GRUB_EFI_DT_APPLY_FIXUPS | GRUB_EFI_DT_RESERVE_MEMORY);
+  if (status != GRUB_EFI_BUFFER_TOO_SMALL)
+    return loaded_fdt;
+
+  fixup_fdt = grub_realloc (loaded_fdt, size);
+  if (!fixup_fdt)
+    return loaded_fdt;
+  loaded_fdt = fixup_fdt;
+
+  status = efi_call_4 (dt_fixup_prot->fixup, dt_fixup_prot, loaded_fdt, &size,
+		       GRUB_EFI_DT_APPLY_FIXUPS | GRUB_EFI_DT_RESERVE_MEMORY);
+
+  if (status == GRUB_EFI_SUCCESS)
+    grub_dprintf ("linux", "Device tree fixed up via EFI_DT_FIXUP_PROTOCOL\n");
+
+  return loaded_fdt;
+}
 
 void *
 grub_fdt_load (grub_size_t additional_size)
@@ -42,7 +76,7 @@ grub_fdt_load (grub_size_t additional_size)
     }
 
   if (loaded_fdt)
-    raw_fdt = loaded_fdt;
+    raw_fdt = grub_fdt_fixup();
   else
     raw_fdt = grub_efi_get_firmware_fdt();
 
@@ -51,7 +85,10 @@ grub_fdt_load (grub_size_t additional_size)
   size += additional_size;
 
   grub_dprintf ("linux", "allocating %d bytes for fdt\n", size);
-  fdt = grub_efi_allocate_any_pages (GRUB_EFI_BYTES_TO_PAGES (size));
+  fdt = grub_efi_allocate_pages_real (GRUB_EFI_MAX_USABLE_ADDRESS,
+				      GRUB_EFI_BYTES_TO_PAGES (size),
+				      GRUB_EFI_ALLOCATE_MAX_ADDRESS,
+				      GRUB_EFI_ACPI_RECLAIM_MEMORY);
   if (!fdt)
     return NULL;
 
