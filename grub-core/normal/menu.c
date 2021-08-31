@@ -580,6 +580,7 @@ run_menu (grub_menu_t menu, int nested, int *auto_boot)
   int default_entry, current_entry;
   int timeout;
   enum timeout_style timeout_style;
+  int initial_timeout_value;
 
   default_entry = get_entry_number (menu, "default");
 
@@ -660,6 +661,7 @@ run_menu (grub_menu_t menu, int nested, int *auto_boot)
 
   current_entry = default_entry;
 
+  initial_timeout_value = grub_menu_get_timeout ();
  refresh:
   menu_init (current_entry, menu, nested);
 
@@ -702,9 +704,9 @@ run_menu (grub_menu_t menu, int nested, int *auto_boot)
 	{
 	  if (timeout >= 0)
 	    {
-	      grub_env_unset ("timeout");
-	      grub_env_unset ("fallback");
-	      clear_timeout ();
+	      /* reset timeout value if the user press any key */
+	      grub_menu_set_timeout(initial_timeout_value);
+	      menu_print_timeout (initial_timeout_value);
 	    }
 
 	  switch (c)
