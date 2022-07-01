@@ -33,6 +33,8 @@
 #endif
 #include <grub/fshelp.h>
 #include <grub/i18n.h>
+#include <grub/crypto.h>
+#include <grub/partition.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -1222,6 +1224,75 @@ grub_disk_addr_t
 }
 #endif
 
+static grub_err_t
+grub_fat_digest  (grub_device_t device, char* hashalg, void *result, int* len)
+{
+#define BUF_SIZE 4096
+#define BUF_SIZE_SEC (BUF_SIZE / GRUB_DISK_SECTOR_SIZE)
+
+  const gcry_md_spec_t *hash = NULL;
+  grub_err_t err = GRUB_ERR_NONE;
+  int sector = 0;
+  int sectors_to_read;
+  int size = BUF_SIZE;
+
+  void *context = NULL;
+  grub_uint8_t *readbuf = NULL;
+
+  hash = grub_crypto_lookup_md_by_name(hashalg);
+
+  if (!hash) {
+    err =  grub_error (GRUB_ERR_BAD_ARGUMENT, "unknown hash algorithm");
+    goto exit_no_free;
+  }
+
+  readbuf = grub_malloc (BUF_SIZE);
+  context = grub_zalloc (hash->contextsize);
+
+  if (!readbuf || !context) {
+    err = grub_errno;
+    goto exit;
+  }
+
+  hash->init (context);
+
+  sectors_to_read = device->disk->partition->len;
+
+  grub_dprintf("fat", "Size of partition in bytes: %d\n", sectors_to_read * GRUB_DISK_SECTOR_SIZE);
+
+  while(sectors_to_read > 0 ) {
+    if (sectors_to_read > BUF_SIZE_SEC) {
+      sectors_to_read -= BUF_SIZE_SEC;
+    } else {
+      size = sectors_to_read * GRUB_DISK_SECTOR_SIZE;
+      sectors_to_read = 0;
+    }
+    err = grub_disk_read (device->disk, sector, 0, size, readbuf);
+    if (err != GRUB_ERR_NONE) {
+      goto exit;
+    }
+    hash->write (context, readbuf, size);
+
+    sector += BUF_SIZE_SEC;
+  }
+
+  hash->final (context);
+  if (err == GRUB_ERR_NONE) {
+    grub_memcpy (result, hash->read (context), hash->mdlen);
+    *len = hash->mdlen;
+  } else {
+    *len = 0;
+  }
+
+exit:
+  if (readbuf)
+    grub_free (readbuf);
+  if (context)
+    grub_free (context);
+exit_no_free:
+  return err;
+}
+
 static struct grub_fs grub_fat_fs =
   {
 #ifdef MODE_EXFAT
@@ -1235,6 +1306,7 @@ static struct grub_fs grub_fat_fs =
     .close = grub_fat_close,
     .label = grub_fat_label,
     .uuid = grub_fat_uuid,
+    .digest = grub_fat_digest,
 #ifdef GRUB_UTIL
 #ifdef MODE_EXFAT
     /* ExFAT BPB is 30 larger than FAT32 one.  */

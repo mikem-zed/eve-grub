@@ -2453,3 +2453,9 @@ module = {
   common = commands/fwconfig.c;
   enable = x86;
 };
+
+module = {
+  name = measurefs;
+  common = commands/measurefs.c;
+  enable = efi;
+};

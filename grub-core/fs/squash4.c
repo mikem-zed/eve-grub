@@ -27,6 +27,8 @@
 #include <grub/fshelp.h>
 #include <grub/deflate.h>
 #include <minilzo.h>
+#include <grub/crypto.h>
+#include <grub/partition.h>
 
 #include "xz.h"
 #include "xz_stream.h"
@@ -992,6 +994,80 @@ grub_squash_mtime (grub_device_t dev, grub_int32_t *tm)
   return GRUB_ERR_NONE;
 } 
 
+static grub_err_t
+grub_squash_digest  (grub_device_t device, char* hashalg, void *result, int* len)
+{
+#define BUF_SIZE 4096
+
+  struct grub_squash_data *data = NULL;
+  const gcry_md_spec_t *hash = NULL;
+  grub_err_t err = GRUB_ERR_NONE;
+  int size = BUF_SIZE;
+  int sector = 0;
+  int bytes_to_read;
+
+  void *context = NULL;
+  grub_uint8_t *readbuf = NULL;
+
+  /* get superblock */
+  data = squash_mount (device->disk);
+  if (!data) {
+    err = grub_errno;
+    goto exit_no_free;
+  }
+
+  hash = grub_crypto_lookup_md_by_name(hashalg);
+
+  if (!hash) {
+    err = grub_error (GRUB_ERR_BAD_ARGUMENT, "unknown hash algorithm");
+    goto exit_no_free;
+  }
+
+  readbuf = grub_malloc (BUF_SIZE);
+  context = grub_zalloc (hash->contextsize);
+
+  if (!readbuf || !context) {
+    err = grub_errno;
+    goto exit;
+  }
+
+  hash->init (context);
+
+  bytes_to_read = grub_le_to_cpu32(data->sb.total_size);
+
+  grub_dprintf("squash4", "Size of squash4 data: %d\n", bytes_to_read);
+
+  while(bytes_to_read > 0 ) {
+    if (bytes_to_read < BUF_SIZE) {
+      size = bytes_to_read;
+      bytes_to_read = 0;
+    } else {
+      bytes_to_read -= BUF_SIZE;
+    }
+    err = grub_disk_read (device->disk, sector, 0, size, readbuf);
+    if (err != GRUB_ERR_NONE) {
+      err = grub_errno;
+      goto exit;
+    }
+    sector += BUF_SIZE / GRUB_DISK_SECTOR_SIZE;
+    hash->write (context, readbuf, size);
+  }
+  hash->final (context);
+
+  if (err == GRUB_ERR_NONE) {
+    grub_memcpy (result, hash->read (context), hash->mdlen);
+    *len = hash->mdlen;
+  } else {
+    *len = 0;
+  }
+
+exit:
+  grub_free (readbuf);
+  grub_free (context);
+exit_no_free:
+  return err;
+}
+
 static struct grub_fs grub_squash_fs =
   {
     .name = "squash4",
@@ -1000,6 +1076,7 @@ static struct grub_fs grub_squash_fs =
     .read = grub_squash_read,
     .close = grub_squash_close,
     .mtime = grub_squash_mtime,
+    .digest = grub_squash_digest,
 #ifdef GRUB_UTIL
     .reserved_first_sector = 0,
     .blocklist_install = 0,

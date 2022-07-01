@@ -83,6 +83,9 @@ struct grub_fs
   /* Get writing time of filesystem. */
   grub_err_t (*mtime) (grub_device_t device, grub_int32_t *timebuf);
 
+  /* Calculate a digest of the entire partition content */
+  grub_err_t (*digest) (grub_device_t device, char* hashalg, void *result, int* len);
+
 #ifdef GRUB_UTIL
   /* Determine sectors available for embedding.  */
   grub_err_t (*embed) (grub_device_t device, unsigned int *nsectors,
